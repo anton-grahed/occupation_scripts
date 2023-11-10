@@ -73,8 +73,7 @@ means we are likely to *overestimate* the occupational persistence
 */
 
 
-// create indicators if a job category is not missing and not labelled as dont know 
-
+// create indicators if a job category is not missing and not labelled as dont know (ADD POTENTIALLY: NOT LABELLED AS OTHER)
 
 foreach var of varlist *job_cat {
 	
@@ -167,13 +166,88 @@ graph export ${ROOT}/persistence_bar.png, replace
 // change back to main 
 cwf main
 
-** check with simple bivariate correlates **
-** gender **
-reg same_job_par0 female
-** born u.s **
-reg same_job_par0 born_us
+** REGRESSION **
+/*
+Regress: what predicts occupational persistence: gender, income, education, age, race, state FE 
+
+*/
+
+// rescale so coef not too small
+gen hhincome_10k = hhincome / 10000
 
 
+// remove 4% of the data with american indian / alaskan native, native hawaiian / other 
+
+
+reghdfe same_job_par0 hhincome_10k, absorb(current_state)
+
+// collapse education
+decode education, gen(educ_str)
+gen high_school = (education == 5 | education == 10 | education == 12) if education != .
+gen college = (education == 13 | education == 14 | education == 16) if education != .
+gen master_phd = (education == 18 | education == 21) if education != .
+
+// collapse race
+decode race, gen(race_str)
+gen aframerican = (race == 1) if race != .
+gen asian = (race == 3) if race != .
+gen white = (race == 4) if race != .
+gen latino = (race == 5) if race != .
+
+
+/*
+check the gen is correct
+tab high_school educ_str 
+tab college educ_str 
+tab master_phd educ_str 
+
+tab aframerican race_str 
+tab asian race_str
+tab white race_str
+tab latino race_str
+*/
+
+
+// = 1 if in any of the 4 categories and = 0 otherwise
+gen race_exist = inlist(1, aframerican, asian, white, latino) if race != .
+
+// label vars
+label var same_job_par0 "Occupational Persistence"
+lab var born_us "Born U.S"
+lab var male "Male"
+lab var hhincome_10k "HH Income (10K)"
+lab var college "Highest Level College"
+lab var master_phd "Highest Level Masters / PhD"
+lab var age "Age"
+lab var aframerican "African American"
+lab var asian "Asian American"
+lab var latino "Latin American"
+
+
+
+
+reghdfe same_job_par0 born_us male hhincome_10k college master_phd age aframerican asian latino if race_exist == 1, absorb(current_state) cluster(current_state)
+
+gen _sample = e(sample)
+
+global spec ""born_us""male""hhincome_10k""college master_phd""age""aframerican asian latino""born_us male hhincome_10k college master_phd age aframerican asian latino""
+
+cap est clear 
+forv i = 1/7 {
+	
+	local ivs : word `i' of $spec
+	
+	eststo mod`i' : reghdfe same_job_par0 `ivs' if _sample == 1, absorb(current_state) cluster(current_state)
+	estadd local FE "Yes"
+	estadd local AR2 e(r2_a)
+}
+
+
+esttab mod* using "${ROOT}/occup_persistence_regtable.tex", replace /// 
+				   b(3) se(3) nomtitle label star(* 0.10 ** 0.05 *** 0.01) ///
+				   booktabs ///
+				   addnotes("Standard errors clustered at state level.") ///
+				   scalars("FE Fixed Effects")
 
 
 
